@@ -1,177 +1,111 @@
-#include "Resource.h"
-#include <algorithm> // transform, lower_bound, find
-#include <cctype>    // tolower, isalnum
+#include "Catalog.h"
 
-// ==============================================================
-// MÉTODOS PRIVADOS AUXILIARES
-// Los definimos "static" porque no dependen del estado (this) de
-// un objeto concreto: son funciones de utilidad ligadas a la clase.
-// ==============================================================
+#include <algorithm>  // count
+#include <fstream>    // ifstream
+#include <sstream>    // stringstream
 
-string Resource::toLower(const string& s) {
-    string result = s; // copiamos: no queremos modificar el original
-    // transform aplica una función a cada elemento del rango [begin, end)
-    // y guarda el resultado a partir de result.begin(). Aquí usamos
-    // ::tolower (la versión global de <cctype>) para pasar cada char
-    // a minúscula.
-    transform(result.begin(), result.end(), result.begin(),
-              [](unsigned char c) { return tolower(c); });
+Catalog::Catalog() {
+    // Constructor implementation
+}
+Catalog::Catalog(const Catalog& other) {
+    // Copy constructor implementation
+    data = other.data;
+}  
+Catalog& Catalog::operator=(const Catalog& other) {
+    // Assignment operator implementation
+    if (this != &other) {
+        data = other.data;
+    }
+    return *this;
+}
+Catalog::~Catalog() {
+    // Destructor implementation
+}
+
+bool Catalog::add(const Resource& r) {
+    if (!r.getId().empty() && findById(r.getId()).getId().empty()) {
+        data.push_back(r);
+        return true;
+    }
+    return false;
+}
+bool Catalog::removeById(const string& id) {
+   for (size_t i = 0; i < data.size(); ++i) {
+        if (data[i].getId() == id) {
+            data.erase(data.begin() + i);
+            return true;
+        }
+    }
+    return false;
+}
+Resource Catalog::findById(const string& id) const {
+    for (size_t i = 0; i < data.size(); ++i) {
+        if (data[i].getId() == id) {
+            return data[i];
+        }
+    }
+    return Resource(); // Return an empty Resource if not found
+}
+
+vector<Resource> Catalog::findByTag(const string& tag) const {
+    vector<Resource> result;
+    for (size_t i = 0; i < data.size(); ++i) {
+        if (data[i].hasTag(tag)) {
+            result.push_back(data[i]);
+        }
+    }
+    // El enunciado exige el resultado ordenado según operator< de Resource (por id).
+    sort(result.begin(), result.end());
     return result;
 }
-
-bool Resource::isValidTagChar(char c) {
-    // A-Z, a-z, 0-9. isalnum() ya cubre exactamente eso para ASCII
-    // (letras y dígitos), así que es más corto que comparar rangos
-    // a mano. Se le pasa (unsigned char) por seguridad: isalnum con
-    // un char negativo (tildes, etc.) es comportamiento indefinido.
-    return isalnum(static_cast<unsigned char>(c)) != 0;
+int Catalog::size() const {
+    return data.size();
 }
-
-string Resource::trim(const string& s) {
-    size_t start = s.find_first_not_of(" \t\n\r");
-    if (start == string::npos) return ""; // la cadena es solo espacios
-    size_t end = s.find_last_not_of(" \t\n\r");
-    // substr(pos, count): extrae "count" caracteres desde "pos".
-    return s.substr(start, end - start + 1);
-}
-
-// ==============================================================
-// FORMA CANÓNICA
-// ==============================================================
-
-// Lista de inicialización (tras los ":"): es la forma preferida en
-// C++ de inicializar atributos, más eficiente que asignarlos dentro
-// del cuerpo del constructor.
-Resource::Resource() : id(""), title(""), year(0) {
-    // tags se inicializa vacío automáticamente (vector por defecto).
-    // Cuerpo vacío: no hay nada más que hacer.
-}
-
-Resource::Resource(const string& id, int year, const string& title)
-    : id(id), title(title), year(year) {
-    // Aquí "id" y "title" (parámetros) tienen el mismo nombre que los
-    // atributos; dentro de la lista de inicialización esto es válido
-    // y el compilador sabe distinguirlos: id(id) significa
-    // "atributo id = parámetro id".
-}
-
-// Constructor de copia: como id, title, year y tags son tipos que
-// ya saben copiarse a sí mismos (string y vector tienen su propio
-// operator=/copy ctor), basta con inicializarlos a partir de "other".
-Resource::Resource(const Resource& other)
-    : id(other.id), title(other.title), year(other.year), tags(other.tags) {
-}
-
-Resource& Resource::operator=(const Resource& other) {
-    // Protección contra auto-asignación (a = a). No es estrictamente
-    // necesaria aquí porque string/vector la soportan bien, pero es
-    // una buena costumbre para cuando gestiones memoria a mano (punteros).
-    if (this != &other) {
-        id = other.id;
-        title = other.title;
-        year = other.year;
-        tags = other.tags;
-    }
-    return *this; // "*this" es el objeto actual; se devuelve por
-                  // referencia para permitir encadenar asignaciones.
-}
-
-Resource::~Resource() {
-    // Nada que liberar manualmente: string y vector son "RAII"
-    // (liberan su propia memoria interna automáticamente al destruirse).
-}
-
-// ==============================================================
-// GETTERS
-// ==============================================================
-
-string Resource::getId() const { return id; }
-string Resource::getTitle() const { return title; }
-int Resource::getYear() const { return year; }
-vector<string> Resource::getTags() const { return tags; }
-// Nota: devolver "vector<string>" (por valor) hace una copia. Es lo
-// correcto aquí porque no queremos que quien llame a getTags() pueda
-// modificar el vector interno directamente (rompería el invariante
-// de "ordenado y sin duplicados").
-
-// ==============================================================
-// GESTIÓN DE ETIQUETAS
-// ==============================================================
-
-bool Resource::addTag(const string& tag) {
-    string trimmed = trim(tag);
-
-    // Validar: solo caracteres A-Z, a-z, 0-9. Si encontramos uno
-    // inválido, rechazamos la tag entera.
-    for (char c : trimmed) {
-        if (!isValidTagChar(c)) return false;
+bool Catalog::loadFromFile(const string& filename) {
+    ifstream file(filename);
+    if (!file.is_open()) {
+        return false; // Failed to open the file
     }
 
-    string normalized = toLower(trimmed);
-    if (normalized.empty()) return false; // no se admiten tags vacías
+    // Se abrió correctamente: borramos los datos actuales
+    data.clear();
 
-    // lower_bound busca, en un rango ORDENADO, la primera posición
-    // donde se podría insertar "normalized" sin romper el orden.
-    // Es la forma eficiente (O(log n) en la búsqueda) de mantener
-    // un vector ordenado, en vez de hacer push_back + sort cada vez.
-    auto it = lower_bound(tags.begin(), tags.end(), normalized);
+    string line;
+    while (getline(file, line)) {
+        if (line.empty()) continue;
 
-    // Si esa posición ya contiene exactamente "normalized", es un
-    // duplicado: no lo añadimos.
-    if (it != tags.end() && *it == normalized) return false;
+        // La línea debe tener EXACTAMENTE 3 separadores '|' (4 campos)
+        int sepCount = count(line.begin(), line.end(), '|');
+        if (sepCount != 3) continue; // línea inválida, se ignora
 
-    // vector::insert desplaza los elementos siguientes para hacer
-    // hueco e inserta "normalized" justo en la posición "it",
-    // manteniendo el vector ordenado.
-    tags.insert(it, normalized);
+        size_t p1 = line.find('|');
+        size_t p2 = line.find('|', p1 + 1);
+        size_t p3 = line.find('|', p2 + 1);
+
+        string idStr   = line.substr(0, p1);
+        string yearStr = line.substr(p1 + 1, p2 - p1 - 1);
+        string title   = line.substr(p2 + 1, p3 - p2 - 1);
+        string tagsStr = line.substr(p3 + 1); // puede quedar vacío
+
+        if (idStr.empty()) continue; // id vacío -> se ignora
+
+        int year = stoi(yearStr); // el enunciado dice que no hace falta validarlo
+
+        Resource r(idStr, year, title);
+
+        // Separar tags por comas y añadirlas con addTag (aplica sus propias
+        // reglas de validación/normalización/orden)
+        stringstream tagsStream(tagsStr);
+        string tag;
+        while (getline(tagsStream, tag, ',')) {
+            r.addTag(tag);
+        }
+
+        // add() ya rechaza el recurso si el id ya existe en el catálogo,
+        // así que "solo se guarda el primero" se cumple automáticamente
+        add(r);
+    }
+
+    file.close();
     return true;
-}
-
-bool Resource::removeTag(const string& tag) {
-    // Importante: aquí NO se hace trim(), solo toLower(), tal y como
-    // pide el enunciado (removeTag normaliza a minúsculas pero no
-    // recorta espacios).
-    string normalized = toLower(tag);
-
-    // find recorre el rango buscando un valor igual a "normalized"
-    // y devuelve un iterador a él (o a tags.end() si no está).
-    auto it = find(tags.begin(), tags.end(), normalized);
-    if (it == tags.end()) return false;
-
-    tags.erase(it); // elimina el elemento apuntado por "it"
-    return true;
-}
-
-bool Resource::hasTag(const string& tag) const {
-    string normalized = toLower(tag); // igual que en removeTag: sin trim
-    return find(tags.begin(), tags.end(), normalized) != tags.end();
-}
-
-// ==============================================================
-// OPERADORES
-// ==============================================================
-
-bool Resource::operator==(const Resource& other) const {
-    return id == other.id;
-}
-
-bool Resource::operator<(const Resource& other) const {
-    return id < other.id; // string ya sabe compararse lexicográficamente
-}
-
-// No es un método de la clase (no lleva Resource::antes... bueno,
-// SÍ que aparece "Resource" pero solo como tipo del parámetro).
-// Al ser "friend", puede leer r.id, r.year, etc. directamente.
-ostream& operator<<(ostream& os, const Resource& r) {
-    os << r.id << " (" << r.year << ") " << r.title << " [";
-    // Imprimimos las tags separadas por comas, sin coma final.
-    for (size_t i = 0; i < r.tags.size(); ++i) {
-        if (i > 0) os << ",";
-        os << r.tags[i];
-    }
-    os << "]";
-    // OJO: el enunciado pide que NO se imprima salto de línea aquí.
-    // Quien llame a operator<< (por ejemplo main.cc) decidirá si
-    // añade "\n" después, según lo que necesite cada comando.
-    return os; // se devuelve el stream para poder encadenar: cout << r1 << r2;
 }

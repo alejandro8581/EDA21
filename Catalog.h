@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include <iostream>
+#include <fstream>   // ifstream
 #include <sstream>   // stringstream
 #include <algorithm> // count
 using namespace std;
@@ -25,4 +26,6 @@ class Catalog {
         vector<Resource> findByTag(const string& tag) const;
         int size() const;
         bool loadFromFile(const string& filename);
-}
+};
+
+#endif // TADCATALOG_H
